@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Генератор скриптов VHD</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background: #fafafa; }
+    .container { max-width: 500px; margin: auto; background: #fff; padding: 20px;
+                 border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+    .form-group { margin-bottom: 12px; }
+    label { display: block; margin-bottom: 4px; }
+    input, select, button { width: 100%; padding: 8px; box-sizing: border-box; }
+    pre { background: #272822; color: #f8f8f2; padding: 10px; overflow-x: auto; }
+    button { margin-top: 10px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Генератор скриптов VHD/VHDX</h2>
+    <div class="form-group">
+      <label for="platform">Платформа</label>
+      <select id="platform">
+        <option value="windows">Windows (PowerShell)</option>
+        <option value="android">Android (sh/Termux)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="path">Путь к образу</label>
+      <input id="path" type="text" value="C:\\VHDs\\disk.vhdx"/>
+    </div>
+    <div class="form-group">
+      <label for="size">Размер (например, 100MB или 1GB)</label>
+      <input id="size" type="text" value="100MB"/>
+    </div>
+    <button id="generate">Сгенерировать скрипт</button>
+
+    <h3>Скрипт</h3>
+    <pre id="scriptOutput">// нажмите «Сгенерировать»</pre>
+    <button id="download" style="display:none;">Скачать скрипт</button>
+  </div>
+
+  <script>
+    const tpl = {
+      windows: ({path, size}) => `# PowerShell-скрипт создания VHD и монтирования «под ключ»
+param(
+  [string]$VhdPath = "${path}",
+  [string]$VhdSize = "${size}"
+)
+New-VHD -Path $VhdPath -Dynamic -SizeBytes $VhdSize \\
+  | Mount-VHD -Passthru \\
+  | Initialize-Disk -PartitionStyle GPT -Passthru \\
+  | New-Partition -UseMaximumSize -AssignDriveLetter \\
+  | Format-Volume -FileSystem NTFS -NewFileSystemLabel "DataDisk" -Confirm:$false
+Write-Host "✅ VHD готов: $VhdPath"`,
+      android: ({path, size}) => `#!/bin/sh
+# Скрипт для Termux/root: создаёт файл-образ и монтирует через loop
+IMAGE_PATH="${path}"
+SIZE="${size}"
+
+# создаём образ
+dd if=/dev/zero of="$IMAGE_PATH" bs=1M count=$(echo $SIZE | awk '/MB/{sub("MB",""); print $1}/GB/{sub("GB",""); print $1*1024}')
+# находим свободное loop-устройство и подключаем
+LOOPDEV=$(losetup -f)
+losetup "$LOOPDEV" "$IMAGE_PATH"
+# форматируем ext4
+mkfs.ext4 "$LOOPDEV"
+# монтируем
+mkdir -p ~/mnt/vhd
+mount "$LOOPDEV" ~/mnt/vhd
+echo "✅ Образ создан и смонтирован в ~/mnt/vhd"`
+
+    }
+
+    document.getElementById('generate').onclick = () => {
+      const platform = document.getElementById('platform').value;
+      const path     = document.getElementById('path').value.trim();
+      const size     = document.getElementById('size').value.trim();
+      const script   = tpl[platform]({path, size});
+      document.getElementById('scriptOutput').textContent = script;
+
+      // подготовка кнопки «Скачать»
+      const blob = new Blob([script], {type: 'text/plain;charset=utf-8'});
+      const url  = URL.createObjectURL(blob);
+      const btn  = document.getElementById('download');
+      btn.href   = url;
+      btn.download = platform === 'windows' ? 'create-vhd.ps1' : 'create-vhd.sh';
+      btn.style.display = 'inline-block';
+    };
+
+    // сделаем <button> как <a>
+    const dl = document.getElementById('download');
+    dl.addEventListener('click', e => {
+      // у <button> нет свойства href, заменим на <a>
+      const a = document.createElement('a');
+      a.href = dl.href;
+      a.download = dl.download;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+  </script>
+</body>
+</html>
